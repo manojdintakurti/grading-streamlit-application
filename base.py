@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import requests
+import os
+import zipfile
+from io import BytesIO
 
 
 # Function to hit each endpoint and handle possible errors
@@ -101,38 +104,51 @@ if uploaded_file is not None:
 
     # Processing each student's base URL
     if st.button('Start Grading'):
-        for index, row in df.iterrows():
-            student_name = row['student_name']  # Assuming the column name for student name
-            base_url = row['base_url']  # Assuming the column name for base URL
-            st.write(f"Processing for {student_name} at {base_url}...")
+        # Memory buffer to hold zip file
+        zip_buffer = BytesIO()
 
-            # Get the API data for this student
-            api_results = get_api_data(base_url)
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for index, row in df.iterrows():
+                student_name = row['student_name']  # Assuming the column name for student name
+                base_url = row['base_url']  # Assuming the column name for base URL
+                st.write(f"Processing for {student_name} at {base_url}...")
 
-            # Validate the API responses
-            validation_results = validate_api_responses(api_results)
+                # Get the API data for this student
+                api_results = get_api_data(base_url)
 
-            # Determine if all tests passed
-            if all("Pass" in result for result in validation_results):
-                final_grade = "Pass"
-            else:
-                final_grade = "Fail"
+                # Validate the API responses
+                validation_results = validate_api_responses(api_results)
 
-            # Append the student's name, validation results, and final grade
-            student_row = {
-                'student_name': student_name,
-                'api/categories': convert_to_string(api_results.get("categories", "N/A")),
-                'api/categories/1001': convert_to_string(api_results.get("category_1001", "N/A")),
-                'api/books/1001': convert_to_string(api_results.get("book_1001", "N/A")),
-                'api/categories/1001/books': convert_to_string(api_results.get("books_in_category", "N/A")),
-                'api/categories/1001/suggested-books': convert_to_string(api_results.get("suggested_books", "N/A")),
-                'api/categories/1001/suggested-books?limit=2': convert_to_string(
-                    api_results.get("suggested_books_limit_2", "N/A")),
-                'Validation Results': "; ".join(validation_results),
-                'Final Grade': final_grade
-            }
+                # Determine if all tests passed
+                if all("Pass" in result for result in validation_results):
+                    final_grade = "Pass"
+                else:
+                    final_grade = "Fail"
 
-            student_results.append(student_row)
+                # Append the student's name, validation results, and final grade
+                student_row = {
+                    'student_name': student_name,
+                    'api/categories': convert_to_string(api_results.get("categories", "N/A")),
+                    'api/categories/1001': convert_to_string(api_results.get("category_1001", "N/A")),
+                    'api/books/1001': convert_to_string(api_results.get("book_1001", "N/A")),
+                    'api/categories/1001/books': convert_to_string(api_results.get("books_in_category", "N/A")),
+                    'api/categories/1001/suggested-books': convert_to_string(api_results.get("suggested_books", "N/A")),
+                    'api/categories/1001/suggested-books?limit=2': convert_to_string(
+                        api_results.get("suggested_books_limit_2", "N/A")),
+                    'Validation Results': "; ".join(validation_results),
+                    'Final Grade': final_grade
+                }
+
+                student_results.append(student_row)
+
+                # Create individual file for the student and add to zip
+                student_file_content = f"Student Name: {student_name}\n"
+                student_file_content += "=" * 50 + "\n"
+                for key, value in student_row.items():
+                    if key != 'student_name':
+                        student_file_content += f"{key}:\n  {value}\n\n"
+
+                zip_file.writestr(f"{student_name}.txt", student_file_content)
 
         # Convert the list of student results to a DataFrame for display
         results_df = pd.DataFrame(student_results)
@@ -149,4 +165,13 @@ if uploaded_file is not None:
             data=csv_output,
             file_name="grading_results.csv",
             mime="text/csv"
+        )
+
+        # Save zip buffer and offer download
+        zip_buffer.seek(0)
+        st.download_button(
+            label="Download All Files as Zip",
+            data=zip_buffer,
+            file_name="student_results.zip",
+            mime="application/zip"
         )
